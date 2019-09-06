@@ -29,7 +29,7 @@ local function addIfNotExists(headers, defaultHeaderName)
 end
 
 local function shouldSignHeader(headerName, headersToSign)
-  for _, header in ipairs(headersToSign) do
+  for _, header in pairs(headersToSign) do
     if headerName:lower() == header:lower() then
       return true
     end
@@ -41,7 +41,7 @@ end
 local function getHeadersToSign(headers, headersToSign)
   local filteredHeaders = {}
 
-  for _, header in ipairs(headers) do
+  for _, header in pairs(headers) do
     if shouldSignHeader(header[1], headersToSign) then
       table.insert(filteredHeaders, header)
     end
@@ -72,7 +72,7 @@ end
 local function canonicalizeHeaders(headers, authHeaderName)
   local normalizedHeaders = {}
 
-  for _, header in ipairs(headers) do
+  for _, header in pairs(headers) do
     local name = utils.trim(header[1]:lower())
 
     if name ~= authHeaderName:lower() then
@@ -85,7 +85,7 @@ local function canonicalizeHeaders(headers, authHeaderName)
   local groupedHeaders = {}
   local lastKey
 
-  for _, header in ipairs(normalizedHeaders) do
+  for _, header in pairs(normalizedHeaders) do
     if lastKey == header[1] then
       groupedHeaders[#groupedHeaders] = string.format("%s,%s", groupedHeaders[#groupedHeaders], header[2])
     else

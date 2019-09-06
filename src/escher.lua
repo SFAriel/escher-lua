@@ -1,5 +1,5 @@
 local date = require("date")
-local socketurl = require("socket.url")
+local urlParser = require("socket.url")
 local utils = require("escher.utils")
 local Canonicalizer = require("escher.canonicalizer")
 local Signer = require("escher.signer")
@@ -41,13 +41,16 @@ local function getQueryParam(self, key)
   return table.concat({ "X", self.vendorKey, key }, "-")
 end
 
+local function escapeDashForPattern(value)
+  return value:gsub("-", "%%-")
+end
+
 local function getQueryParamEscaped(self, key)
-  local escapedParam = string.gsub(getQueryParam(self, key), "-", "%%-")
-  return escapedParam
+  return escapeDashForPattern(getQueryParam(self, key))
 end
 
 local function getHeaderValue(headers, headerName)
-  for _, header in ipairs(headers) do
+  for _, header in pairs(headers) do
     local name = utils.trim(header[1]:lower())
 
     if name == headerName:lower() then
@@ -61,12 +64,12 @@ local function throwError(error, debugInfo)
 end
 
 local function parseQuery(self, query)
-  query = socketurl.unescape(query)
+  query = urlParser.unescape(query)
 
-  local algorithmPattern = getQueryParamEscaped(self ,"Algorithm") .. "=" .. self.algoPrefix .. "%-HMAC%-(%w+)"
-  local credentialPattern = getQueryParamEscaped(self ,"Credentials") .. "=([A-Za-z0-9%-%_]+)/(%d+)/([A-Za-z0-9%-%_%/% ]+)"
-  local signedHeadersPattern = getQueryParamEscaped(self ,"SignedHeaders") .. "=([a-z0-9%-%_%;]+)"
-  local signaturePattern = getQueryParamEscaped(self ,"Signature") .. "=([a-f0-9]+)"
+  local algorithmPattern = getQueryParamEscaped(self, "Algorithm") .. "=" .. self.algoPrefix .. "%-HMAC%-(%w+)"
+  local credentialPattern = getQueryParamEscaped(self, "Credentials") .. "=([A-Za-z0-9%-%_]+)/(%d+)/([A-Za-z0-9%-%_%/% ]+)"
+  local signedHeadersPattern = getQueryParamEscaped(self, "SignedHeaders") .. "=([a-z0-9%-%_%;]+)"
+  local signaturePattern = getQueryParamEscaped(self, "Signature") .. "=([a-f0-9]+)"
 
   local hashAlgo = string.match(query, algorithmPattern)
   local accessKeyId, shortDate, credentialScope = string.match(query, credentialPattern)
@@ -84,10 +87,10 @@ local function parseQuery(self, query)
 end
 
 local function stripSignatureFromQuery(self, url)
-  local signaturePattern = getQueryParamEscaped(self ,"Signature") .. "=([a-f0-9]+)"
+  local signaturePattern = getQueryParamEscaped(self, "Signature") .. "=([a-f0-9]+)"
   local parts = {}
 
-  for _, value in ipairs(utils.split(url, "&")) do
+  for _, value in pairs(utils.split(url, "&")) do
     if not string.match(value, signaturePattern) then
       table.insert(parts, value)
     end
@@ -128,17 +131,17 @@ end
 function Escher:authenticate(request, getApiSecret, mandatorySignedHeaders)
   request = utils.merge({}, request)
 
-  local query = socketurl.parse(request.url).query
-  local isPresignedUrl = request.method == "GET" and query and string.match(query, getQueryParamEscaped(self ,"Signature"))
+  local query = urlParser.parse(request.url).query
+  local isPresignedUrl = request.method == "GET" and query and string.match(query, getQueryParamEscaped(self, "Signature"))
 
   local requestDate
   local authParts
   local expires
 
   if isPresignedUrl then
-    requestDate = date(string.match(query, getQueryParamEscaped(self ,"Date") .. "=([A-Za-z0-9]+)"))
+    requestDate = date(string.match(query, getQueryParamEscaped(self, "Date") .. "=([A-Za-z0-9]+)"))
     authParts = parseQuery(self, query)
-    expires = tonumber(string.match(query, getQueryParamEscaped(self ,"Expires") .."=([0-9]+)"))
+    expires = tonumber(string.match(query, getQueryParamEscaped(self, "Expires") .. "=([0-9]+)"))
 
     request.url = stripSignatureFromQuery(self, request.url)
     request.body = UNSIGNED_PAYLOAD
@@ -171,7 +174,7 @@ function Escher:authenticate(request, getApiSecret, mandatorySignedHeaders)
 
   local headersToSign = utils.split(authParts.signedHeaders, ";")
 
-  for _, header in ipairs(headersToSign) do
+  for _, header in pairs(headersToSign) do
     if string.lower(header) ~= header then
       return throwError("SignedHeaders must contain lowercase header names in the " .. self.authHeaderName .. " header")
     end
@@ -189,7 +192,7 @@ function Escher:authenticate(request, getApiSecret, mandatorySignedHeaders)
     table.insert(mandatorySignedHeaders, self.dateHeaderName:lower())
   end
 
-  for _, header in ipairs(mandatorySignedHeaders) do
+  for _, header in pairs(mandatorySignedHeaders) do
     if type(header) ~= "string" then
       return throwError("The mandatorySignedHeaders parameter must be undefined or array of strings")
     end
@@ -251,7 +254,7 @@ function Escher:authenticate(request, getApiSecret, mandatorySignedHeaders)
 end
 
 local function hasHeader(headers, headerName)
-  for _, values in ipairs(headers) do
+  for _, values in pairs(headers) do
     if values[1]:lower() == headerName:lower() then
       return true
     end
@@ -267,7 +270,7 @@ local function addDateHeaderIfNotExists(self, headers)
 end
 
 local function getAlgorithmId(self)
-  return self.algoPrefix .. "-HMAC-" .. self.hashAlgo
+  return table.concat({ self.algoPrefix, "HMAC", self.hashAlgo }, "-")
 end
 
 local function getCredentials(self)
@@ -305,10 +308,9 @@ end
 
 local function stripHash(parsedUrl)
   parsedUrl = utils.merge({}, parsedUrl)
-
   parsedUrl.fragment = ""
 
-  local builtUrl = socketurl.build(parsedUrl)
+  local builtUrl = urlParser.build(parsedUrl)
 
   return string.gsub(builtUrl, "#", "")
 end
@@ -321,14 +323,18 @@ function Escher:generatePreSignedUrl(url, client, expires)
   expires = expires or ONE_DAY_IN_SECONDS
 
   local headersToSign = { "host" }
-  local parsedUrl = socketurl.parse(socketurl.unescape(url))
+  local parsedUrl = urlParser.parse(urlParser.unescape(url))
   local hash = getHash(parsedUrl)
 
   if #hash > 0 then
     url = stripHash(parsedUrl)
   end
 
-  local fullCredentials = encodeSlashes(client[1] .. "/" .. utils.toShortDate(self.date) .. "/" .. self.credentialScope)
+  local fullCredentials = encodeSlashes(table.concat({
+    client[1],
+    utils.toShortDate(self.date),
+    self.credentialScope
+  }, "/"))
 
   local signedUrl = table.concat({
     url,
@@ -339,10 +345,8 @@ function Escher:generatePreSignedUrl(url, client, expires)
     getQueryParam(self, "SignedHeaders") .. "=" .. table.concat(headersToSign, ";")
   }, "&") .. "&"
 
-  local parsedSignedUrl = socketurl.parse(signedUrl)
-
+  local parsedSignedUrl = urlParser.parse(signedUrl)
   local host = parsedUrl.host
-
   local request = {
     host = host,
     method = "GET",
@@ -355,7 +359,7 @@ function Escher:generatePreSignedUrl(url, client, expires)
 
   local signature = Signer(self):calculateSignature(request, headersToSign, self.date, self.apiSecret)
 
-  return signedUrl .. getQueryParam(self, "Signature") .."=" .. signature  .. hash
+  return signedUrl .. getQueryParam(self, "Signature") .. "=" .. signature .. hash
 end
 
 return Escher

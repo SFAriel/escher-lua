@@ -6,94 +6,111 @@
 
 local M = {}
 
+local function decodeHexString(str)
+  return string.char(tonumber(str, 16))
+end
+
 local function decode(str)
-  str = str:gsub('+', ' ')
-  return (str:gsub("%%(%x%x)", function(c)
-    return string.char(tonumber(c, 16))
-  end))
+  return str:gsub("+", " "):gsub("%%(%x%x)", decodeHexString)
+end
+
+local function encodeAsHexString(char)
+  return string.format("%%%02x", string.byte(char)):upper()
 end
 
 local function encode(str)
-  return (str:gsub("([^A-Za-z0-9%_%.%-%~])", function(v)
-    return string.upper(string.format("%%%02x", string.byte(v)))
-  end))
+  return str:gsub("([^A-Za-z0-9%_%.%-%~])", encodeAsHexString)
 end
 
 function M.parse(url)
+  url = tostring(url or "")
+
   local comp = {}
+
   M.setQuery(comp, "")
 
-  url = tostring(url or '')
-  url = url:gsub('%?(.*)', function(v)
+  url = url:gsub("%?(.*)", function(v)
     M.setQuery(comp, v)
-    return ''
+    return ""
   end)
+
   comp.path = url
 
-  setmetatable(comp, {
+  return setmetatable(comp, {
     __index = M,
-    __tostring = M.build}
-  )
-  return comp
+    __tostring = M.build
+  })
 end
 
-function M.buildQuery(tab)
+function M.buildQuery(queryParts)
   local query = {}
-  for _, q in ipairs(tab) do
-    local name = encode(q[1])
-    local value = encode(q[2])
-    table.insert(query, string.format('%s=%s', name, value))
+
+  for _, queryPart in pairs(queryParts) do
+    local name = encode(queryPart[1])
+    local value = encode(queryPart[2])
+
+    table.insert(query, string.format("%s=%s", name, value))
   end
+
   table.sort(query)
+
   return table.concat(query, "&")
 end
 
 function M.parseQuery(str)
   local values = {}
-  for m in str:gmatch("[^&]+") do
-    local key, val = m:match("([^=]*)=?(.*)")
+
+  for queryPartAsString in str:gmatch("[^&]+") do
+    local key, val = queryPartAsString:match("([^=]*)=?(.*)")
+
     key = decode(key)
-    key = key:gsub('=+.*$', "")
-    val = val:gsub('^=+', "")
+    key = key:gsub("=+.*$", "")
+    val = val:gsub("^=+", "")
+
     table.insert(values, { key, decode(val) })
   end
+
   setmetatable(values, { __tostring = M.buildQuery })
+
   return values
 end
 
 function M:setQuery(query)
   self.queryParts = M.parseQuery(query)
   self.query = M.buildQuery(self.queryParts)
+
   return query
 end
 
 local function absolutePath(path)
-  path = path:gsub("([^/]*%./)", function (s)
-    if s ~= "./" then return s else return "" end
+  path = path:gsub("([^/]*%./)", function(str)
+    if str ~= "./" then return str else return "" end
   end)
 
   local reduced
   while reduced ~= path do
     reduced = path
-    path = string.gsub(reduced, "([^/]*/%.%./)", function (s)
-      if s ~= "../../" then return "" else return s end
+    path = reduced:gsub("([^/]*/%.%./)", function(str)
+      if str ~= "../../" then return "" else return str end
     end)
   end
-  path = string.gsub(path, "([^/]*/%.%.?)$", function (s)
-    if s ~= "../.." then return "" else return s end
+
+  path = path:gsub("([^/]*/%.%.?)$", function(str)
+    if str ~= "../.." then return "" else return str end
   end)
 
   local reduced
   while reduced ~= path do
     reduced = path
-    path = string.gsub(reduced, '^/?%.%./', '')
+    path = reduced:gsub("^/?%.%./", "")
   end
-  return '/' .. path
+
+  return "/" .. path
 end
 
 function M:normalize()
-  self.path = absolutePath(self.path)
-  self.path = string.gsub(self.path, "//+", "/")
+  self.path = absolutePath(self.path):gsub("//+", "/")
+
   return self
 end
 
